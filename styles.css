@@ -14,14 +14,15 @@
 
 .itt-body { display: flex; flex: 1; min-height: 0; }
 .itt-cols {
-  display: flex; gap: 10px; align-items: flex-start;
-  overflow-x: auto; overflow-y: hidden;
-  padding: 10px; flex: 1; min-width: 0; height: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 300px);
+  gap: 10px; align-items: start;
+  overflow: auto; padding: 10px; flex: 1; min-width: 0; height: 100%;
 }
 
 .itt-col {
-  min-width: 260px; width: 300px; flex-shrink: 0;
-  max-height: 100%; display: flex; flex-direction: column;
+  min-width: 0; width: auto;
+  display: flex; flex-direction: column;
   border: 1px solid var(--background-modifier-border); border-radius: 8px;
   background: var(--background-secondary);
 }
@@ -46,6 +47,7 @@
 .itt-col-grip:active { cursor: grabbing; }
 .itt-col.itt-drop-col-left { box-shadow: inset 3px 0 0 0 var(--color-accent); }
 .itt-col.itt-drop-col-right { box-shadow: inset -3px 0 0 0 var(--color-accent); }
+.itt-col.itt-drop-col-below { box-shadow: inset 0 -3px 0 0 var(--color-accent); }
 
 .itt-cards {
   overflow-y: auto; padding: 6px 8px 8px;

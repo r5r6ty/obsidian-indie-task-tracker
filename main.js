@@ -10,7 +10,7 @@
 const { Plugin, ItemView, Notice, Setting, PluginSettingTab, TFile, TFolder, Menu, MarkdownRenderer, WorkspaceLeaf, normalizePath } = require('obsidian');
 
 const VIEW_TYPE = 'itt-board-view';
-const DEFAULTS = { boardPath: '任务看板.md', detailWidth: 420 };
+const DEFAULTS = { boardPath: '任务看板.md', detailWidth: 420, rowBreaks: [] };
 
 /* ============================================================
  * 解析 / 序列化（与 Tools/IndieTaskTracker/BoardDoc.cs 同口径）
@@ -297,16 +297,56 @@ class BoardView extends ItemView {
     this.render();
   }
 
-  /* 整列左右移动（toCi = 原始下标系的插入位；同列原位自动跳过） */
-  moveColumnTo(fromCi, toCi) {
+  /* 行段划分：rowBreaks（列名）标记「此列另起一行」 */
+  getRowSegments() {
+    const breaks = this.plugin.settings.rowBreaks || [];
+    const segs = [[]];
+    this.doc.columns.forEach((col, i) => {
+      if (i > 0 && breaks.includes(col.name)) segs.push([]);
+      segs[segs.length - 1].push(i);
+    });
+    return segs;
+  }
+
+  /* 整列 2D 移动：mode = 'left' | 'right' | 'below'，target = 目标列线性下标。
+     below = 目标列正下方：落在下一行同格（下一行不存在则末尾另起一行） */
+  moveColumnTo(fromCi, mode, targetCi) {
     const cols = this.doc.columns;
-    if (fromCi < 0 || fromCi >= cols.length) return;
-    toCi = Math.max(0, Math.min(toCi, cols.length));
-    if (toCi === fromCi || toCi === fromCi + 1) return;   // 原位
+    if (fromCi < 0 || fromCi >= cols.length || !cols[targetCi]) return;
+    const breaks = this.plugin.settings.rowBreaks || (this.plugin.settings.rowBreaks = []);
+    const moved = cols[fromCi], tgt = cols[targetCi];
+    const segs = this.getRowSegments();
+    const fromSeg = segs.find(s => s.includes(fromCi));
+
+    let insertAt, movedBr;   // 原始线性插入位 / 移动后是否行首
+    if (mode === 'below') {
+      const tgtSeg = segs.find(s => s.includes(targetCi));
+      const next = segs[segs.indexOf(tgtSeg) + 1];
+      if (!next) { insertAt = cols.length; movedBr = true; }   // 目标在最后一行 → 末尾另起一行
+      else { insertAt = next[0] + Math.min(tgtSeg.indexOf(targetCi), next.length); movedBr = false; }
+    } else {
+      insertAt = mode === 'left' ? targetCi : targetCi + 1;
+      movedBr = mode === 'left' ? breaks.includes(tgt.name) : false;   // 左侧继承目标列行首身份；右侧=同行
+    }
+
+    const adjusted = insertAt > fromCi ? insertAt - 1 : insertAt;
+    if (adjusted === fromCi) return;   // 没挪窝，什么都不动
+
+    // 离开旧段：自己是行首就把行首让给旧段下一列
+    if (breaks.includes(moved.name)) {
+      breaks.splice(breaks.indexOf(moved.name), 1);
+      const followers = fromSeg.filter(i => i !== fromCi && i > fromCi);
+      if (followers.length && !breaks.includes(cols[followers[0]].name)) breaks.push(cols[followers[0]].name);
+    }
+    // left 抢目标列的行首身份（moved 接管行首，目标列退为同行后继）
+    if (mode === 'left' && breaks.includes(tgt.name)) breaks.splice(breaks.indexOf(tgt.name), 1);
+    if (movedBr && !breaks.includes(moved.name)) breaks.push(moved.name);
+
     const [col] = cols.splice(fromCi, 1);
-    let idx = toCi;
-    if (fromCi < idx) idx -= 1;   // 先移除后插入的索引补偿
-    cols.splice(idx, 0, col);
+    if (fromCi < insertAt) insertAt -= 1;
+    cols.splice(insertAt, 0, col);
+
+    this.plugin.saveSettings();
     this.scheduleWrite();
     this.render();
   }
@@ -349,17 +389,18 @@ class BoardView extends ItemView {
     this.dropMark = null;
   }
 
-  /* 整列拖动落点指示：before = 插到该列左侧，否则右侧 */
-  setColDropIndicator(colEl, before) {
+  /* 整列拖动落点指示：mode = 'left' | 'right' | 'below' */
+  setColDropIndicator(colEl, mode) {
     for (const x of this.colEls) {
       const on = x.el === colEl;
-      x.el.classList.toggle('itt-drop-col-left', on && before);
-      x.el.classList.toggle('itt-drop-col-right', on && !before);
+      x.el.classList.toggle('itt-drop-col-left', on && mode === 'left');
+      x.el.classList.toggle('itt-drop-col-right', on && mode === 'right');
+      x.el.classList.toggle('itt-drop-col-below', on && mode === 'below');
     }
   }
 
   clearColDropIndicator() {
-    for (const x of this.colEls) x.el.classList.remove('itt-drop-col-left', 'itt-drop-col-right');
+    for (const x of this.colEls) x.el.classList.remove('itt-drop-col-left', 'itt-drop-col-right', 'itt-drop-col-below');
   }
 
   /* 移动卡（insertIdx 省略=追加到列尾；同列先移除后插入的索引自动补偿） */
@@ -404,7 +445,11 @@ class BoardView extends ItemView {
   }
 
   renameColumn(ci, name) {
-    this.doc.columns[ci].name = name.trim() || '(未命名列)';
+    const old = this.doc.columns[ci].name;
+    name = name.trim() || '(未命名列)';
+    this.doc.columns[ci].name = name;
+    const b = this.plugin.settings.rowBreaks;   // 行首标记按列名记账，改名跟着走
+    if (b) { const i = b.indexOf(old); if (i >= 0) b[i] = name; }
     this.scheduleWrite();
     this.render();
   }
@@ -472,15 +517,27 @@ class BoardView extends ItemView {
     const cols = body.createDiv({ cls: 'itt-cols' });
     this.cardEls = [];
     this.colEls = [];
-    this.doc.columns.forEach((col, ci) => this.renderCol(cols, col, ci));
-    // 整列拖动（数据库用法：列顺序即数据结构）——container 级处理 text/itt-col，与卡片拖拽互不干扰
+    // 行派生：rowBreaks（按列名）标记「此列另起一行」；grid 按（行,行内序）显式落格——拖到下面就是正下方
+    const breaks = this.plugin.settings.rowBreaks || [];
+    let rowIdx = 0, colIdx = 0;
+    this.doc.columns.forEach((col, ci) => {
+      if (ci > 0 && breaks.includes(col.name)) { rowIdx += 1; colIdx = 0; }
+      this.renderCol(cols, col, ci);
+      const ce = this.colEls[this.colEls.length - 1];
+      ce.el.style.gridRow = String(rowIdx + 1);
+      ce.el.style.gridColumn = String(colIdx + 1);
+      colIdx += 1;
+    });
+    // 整列拖动：上 62% = 左/右（旁边），下 38% = 正下方（另起一行）
     cols.addEventListener('dragover', e => {
       if (!e.dataTransfer.types.includes('text/itt-col')) return;
       e.preventDefault(); e.dataTransfer.dropEffect = 'move';
       const colEl = e.target.closest('.itt-col');
       if (!colEl) { this.clearColDropIndicator(); return; }
       const r = colEl.getBoundingClientRect();
-      this.setColDropIndicator(colEl, e.clientX < r.left + r.width / 2);
+      const mode = e.clientY > r.top + r.height * 0.62 ? 'below'
+        : (e.clientX < r.left + r.width / 2 ? 'left' : 'right');
+      this.setColDropIndicator(colEl, mode);
     });
     cols.addEventListener('dragleave', () => this.clearColDropIndicator());
     cols.addEventListener('drop', e => {
@@ -493,9 +550,9 @@ class BoardView extends ItemView {
       const hit = this.colEls.find(x => x.el === colEl);
       if (!hit) return;
       const r = colEl.getBoundingClientRect();
-      let toCi = hit.ci;
-      if (e.clientX >= r.left + r.width / 2) toCi += 1;   // 右半 = 插到它后面
-      this.moveColumnTo(fromCi, toCi);
+      const mode = e.clientY > r.top + r.height * 0.62 ? 'below'
+        : (e.clientX < r.left + r.width / 2 ? 'left' : 'right');
+      this.moveColumnTo(fromCi, mode, hit.ci);
     });
     this.renderDetailInto(detail, focusTitle);
   }
@@ -569,7 +626,11 @@ class BoardView extends ItemView {
     add.addEventListener('click', () => this.addCard(ci));
     const del = tools.createEl('button', { text: '✕', attr: { title: '删除列' } });
     del.addEventListener('click', () => {
-      if (del.dataset.arm) { this.doc.columns.splice(ci, 1); this.sel = null; this.scheduleWrite(); this.render(); }
+      if (del.dataset.arm) {
+        const b = this.plugin.settings.rowBreaks;   // 删列时清掉行首标记
+        if (b) { const i = b.indexOf(col.name); if (i >= 0) b.splice(i, 1); }
+        this.doc.columns.splice(ci, 1); this.sel = null; this.scheduleWrite(); this.render();
+      }
       else { del.dataset.arm = '1'; del.textContent = '确认?'; setTimeout(() => { del.dataset.arm = ''; del.textContent = '✕'; }, 2500); }
     });
 
