@@ -308,8 +308,7 @@ class BoardView extends ItemView {
     return segs;
   }
 
-  /* 整列 2D 移动：mode = 'left' | 'right' | 'below'，target = 目标列线性下标。
-     below = 目标列正下方：落在下一行同格（下一行不存在则末尾另起一行） */
+  /* 整列 2D 移动：mode = 'left' | 'right'（同行相邻）| 'rowAbove' | 'rowBelow'（自成一行，紧贴目标行的上/下） */
   moveColumnTo(fromCi, mode, targetCi) {
     const cols = this.doc.columns;
     if (fromCi < 0 || fromCi >= cols.length || !cols[targetCi]) return;
@@ -317,14 +316,12 @@ class BoardView extends ItemView {
     const moved = cols[fromCi], tgt = cols[targetCi];
     const segs = this.getRowSegments();
     const fromSeg = segs.find(s => s.includes(fromCi));
+    const tgtSeg = segs.find(s => s.includes(targetCi));
 
     let insertAt, movedBr;   // 原始线性插入位 / 移动后是否行首
-    if (mode === 'below') {
-      const tgtSeg = segs.find(s => s.includes(targetCi));
-      const next = segs[segs.indexOf(tgtSeg) + 1];
-      if (!next) { insertAt = cols.length; movedBr = true; }   // 目标在最后一行 → 末尾另起一行
-      else { insertAt = next[0] + Math.min(tgtSeg.indexOf(targetCi), next.length); movedBr = false; }
-    } else {
+    if (mode === 'rowAbove') { insertAt = tgtSeg[0]; movedBr = true; }
+    else if (mode === 'rowBelow') { insertAt = tgtSeg[tgtSeg.length - 1] + 1; movedBr = true; }
+    else {
       insertAt = mode === 'left' ? targetCi : targetCi + 1;
       movedBr = mode === 'left' ? breaks.includes(tgt.name) : false;   // 左侧继承目标列行首身份；右侧=同行
     }
@@ -345,6 +342,10 @@ class BoardView extends ItemView {
     const [col] = cols.splice(fromCi, 1);
     if (fromCi < insertAt) insertAt -= 1;
     cols.splice(insertAt, 0, col);
+
+    // 自成一行的插入：把身后一列顶成新行首，保证 moved 独占一行
+    const nextCol = cols[insertAt + 1];
+    if (movedBr && nextCol && !breaks.includes(nextCol.name)) breaks.push(nextCol.name);
 
     this.plugin.saveSettings();
     this.scheduleWrite();
@@ -389,18 +390,19 @@ class BoardView extends ItemView {
     this.dropMark = null;
   }
 
-  /* 整列拖动落点指示：mode = 'left' | 'right' | 'below' */
+  /* 整列拖动落点指示：mode = 'left' | 'right' | 'rowAbove' | 'rowBelow' */
   setColDropIndicator(colEl, mode) {
     for (const x of this.colEls) {
       const on = x.el === colEl;
       x.el.classList.toggle('itt-drop-col-left', on && mode === 'left');
       x.el.classList.toggle('itt-drop-col-right', on && mode === 'right');
-      x.el.classList.toggle('itt-drop-col-below', on && mode === 'below');
+      x.el.classList.toggle('itt-drop-col-above', on && mode === 'rowAbove');
+      x.el.classList.toggle('itt-drop-col-below', on && mode === 'rowBelow');
     }
   }
 
   clearColDropIndicator() {
-    for (const x of this.colEls) x.el.classList.remove('itt-drop-col-left', 'itt-drop-col-right', 'itt-drop-col-below');
+    for (const x of this.colEls) x.el.classList.remove('itt-drop-col-left', 'itt-drop-col-right', 'itt-drop-col-above', 'itt-drop-col-below');
   }
 
   /* 移动卡（insertIdx 省略=追加到列尾；同列先移除后插入的索引自动补偿） */
@@ -517,26 +519,25 @@ class BoardView extends ItemView {
     const cols = body.createDiv({ cls: 'itt-cols' });
     this.cardEls = [];
     this.colEls = [];
-    // 行派生：rowBreaks（按列名）标记「此列另起一行」；grid 按（行,行内序）显式落格——拖到下面就是正下方
+    // 双层列表：外层竖排（行），内层横排（列）；rowBreaks（按列名）标记「此列另起一行」，行高紧贴内容
     const breaks = this.plugin.settings.rowBreaks || [];
-    let rowIdx = 0, colIdx = 0;
+    let row = cols.createDiv({ cls: 'itt-row' });
     this.doc.columns.forEach((col, ci) => {
-      if (ci > 0 && breaks.includes(col.name)) { rowIdx += 1; colIdx = 0; }
-      this.renderCol(cols, col, ci);
-      const ce = this.colEls[this.colEls.length - 1];
-      ce.el.style.gridRow = String(rowIdx + 1);
-      ce.el.style.gridColumn = String(colIdx + 1);
-      colIdx += 1;
+      if (ci > 0 && breaks.includes(col.name)) row = cols.createDiv({ cls: 'itt-row' });
+      this.renderCol(row, col, ci);
     });
-    // 整列拖动：上 62% = 左/右（旁边），下 38% = 正下方（另起一行）
+    // 整列拖动三区：列顶 18% = 上面一行；中部 = 左/右（同行）；列底 22% = 下面一行
     cols.addEventListener('dragover', e => {
       if (!e.dataTransfer.types.includes('text/itt-col')) return;
       e.preventDefault(); e.dataTransfer.dropEffect = 'move';
       const colEl = e.target.closest('.itt-col');
       if (!colEl) { this.clearColDropIndicator(); return; }
       const r = colEl.getBoundingClientRect();
-      const mode = e.clientY > r.top + r.height * 0.62 ? 'below'
-        : (e.clientX < r.left + r.width / 2 ? 'left' : 'right');
+      const y = e.clientY - r.top;
+      let mode;
+      if (y < r.height * 0.18) mode = 'rowAbove';
+      else if (y > r.height * 0.78) mode = 'rowBelow';
+      else mode = e.clientX < r.left + r.width / 2 ? 'left' : 'right';
       this.setColDropIndicator(colEl, mode);
     });
     cols.addEventListener('dragleave', () => this.clearColDropIndicator());
@@ -550,8 +551,11 @@ class BoardView extends ItemView {
       const hit = this.colEls.find(x => x.el === colEl);
       if (!hit) return;
       const r = colEl.getBoundingClientRect();
-      const mode = e.clientY > r.top + r.height * 0.62 ? 'below'
-        : (e.clientX < r.left + r.width / 2 ? 'left' : 'right');
+      const y = e.clientY - r.top;
+      let mode;
+      if (y < r.height * 0.18) mode = 'rowAbove';
+      else if (y > r.height * 0.78) mode = 'rowBelow';
+      else mode = e.clientX < r.left + r.width / 2 ? 'left' : 'right';
       this.moveColumnTo(fromCi, mode, hit.ci);
     });
     this.renderDetailInto(detail, focusTitle);
