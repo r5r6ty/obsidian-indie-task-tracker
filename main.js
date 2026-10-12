@@ -506,8 +506,25 @@ class BoardView extends ItemView {
       if (!e.dataTransfer.types.includes('text/itt-card')) return;
       e.preventDefault(); e.dataTransfer.dropEffect = 'move';
       el.classList.add('itt-drop');
+      // 列头 / 首卡上方 = 插到列顶；末卡下方 / 列尾空区 = 追加；卡间空隙 = 就近插入
+      const box = this.colEls.find(x => x.el === el).cards;
+      const rects = [...box.children].map(c => c.getBoundingClientRect());
+      if (e.target.closest('.itt-col-head') || !rects.length || e.clientY < rects[0].top) {
+        this.setDropIndicator(ci, 0);
+        return;
+      }
+      if (e.clientY > rects[rects.length - 1].bottom) {
+        this.setDropIndicator(ci, this.doc.columns[ci].cards.length);
+        return;
+      }
+      for (let k = 0; k < rects.length - 1; k++) {
+        if (e.clientY >= rects[k].bottom && e.clientY <= rects[k + 1].top) {
+          this.setDropIndicator(ci, k + 1);
+          return;
+        }
+      }
       if (!this.dropMark || this.dropMark.col !== ci)
-        this.setDropIndicator(ci, this.doc.columns[ci].cards.length);   // 列空白区 = 丢到列尾
+        this.setDropIndicator(ci, this.doc.columns[ci].cards.length);
     });
     el.addEventListener('dragleave', () => el.classList.remove('itt-drop'));
     el.addEventListener('drop', e => {
@@ -515,10 +532,12 @@ class BoardView extends ItemView {
       if (e.dataTransfer.types.includes('text/itt-col')) return;   // 列拖拽交给 container 处理
       const cards = this._dragCards;
       if (!cards || !cards.length) { this.clearDropIndicator(); return; }
-      // 落点必须先读后清：clearDropIndicator 会把 dropMark 置 null
-      const idx = this.dropMark && this.dropMark.col === ci
-        ? this.dropMark.idx
-        : this.doc.columns[ci].cards.length;
+      // 落点先读后清（clearDropIndicator 会置 null dropMark）；列头 = 插到列顶
+      const onHead = !!e.target.closest('.itt-col-head');
+      const idx = onHead ? 0
+        : this.dropMark && this.dropMark.col === ci
+          ? this.dropMark.idx
+          : this.doc.columns[ci].cards.length;
       this.clearDropIndicator();
       if (cards.length > 1) this.moveCardsTo(cards, ci, idx);
       else {
