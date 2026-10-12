@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-indie-task-tracker",
+  "name": "IndieTaskTracker",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.0",
+  "description": "看板式任务记账：标题一行、点开看正文；与 Tools/IndieTaskTracker 共用同一份 Markdown 看板，外部改动自动刷新。",
+  "author": "r5r6ty",
+  "isDesktopOnly": false
+}
