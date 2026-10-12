@@ -305,20 +305,6 @@ class BoardView extends ItemView {
     this.render();
   }
 
-  moveCardTo(fromCi, cardIdx, toCi, insertIdx) {
-    const from = this.doc.columns[fromCi], to = this.doc.columns[toCi];
-    if (!from || !to || cardIdx < 0 || cardIdx >= from.cards.length) return;
-    const [card] = from.cards.splice(cardIdx, 1);
-    let idx = insertIdx == null ? to.cards.length : insertIdx;
-    if (fromCi === toCi && cardIdx < idx) idx -= 1;
-    idx = Math.max(0, Math.min(idx, to.cards.length));
-    to.cards.splice(idx, 0, card);
-    this.sel = card;
-    this.multiCards = [card];
-    this.scheduleWrite();
-    this.render();
-  }
-
   addCard(ci) {
     const col = this.doc.columns[ci];
     const card = { title: '新任务', lines: [] };
@@ -474,12 +460,14 @@ class BoardView extends ItemView {
     });
     el.addEventListener('dragleave', () => el.classList.remove('itt-drop'));
     el.addEventListener('drop', e => {
-      e.preventDefault(); el.classList.remove('itt-drop'); this.clearDropIndicator();
+      e.preventDefault(); el.classList.remove('itt-drop');
       const cards = this._dragCards;
-      if (!cards || !cards.length) return;
+      if (!cards || !cards.length) { this.clearDropIndicator(); return; }
+      // 落点必须先读后清：clearDropIndicator 会把 dropMark 置 null
       const idx = this.dropMark && this.dropMark.col === ci
         ? this.dropMark.idx
         : this.doc.columns[ci].cards.length;
+      this.clearDropIndicator();
       if (cards.length > 1) this.moveCardsTo(cards, ci, idx);
       else {
         const fromCi = this.doc.columns.findIndex(c => c.cards.includes(cards[0]));
