@@ -68,6 +68,12 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .itt-title-md p { margin: 0; padding: 0; display: inline; }
+/* 插件内删除线红色：卡片标题 + 正文预览 */
+.itt-board-view del,
+.itt-board-view s {
+  color: var(--text-error);
+  text-decoration-color: var(--text-error);
+}
 
 .itt-detail {
   width: 420px; flex-shrink: 0;
