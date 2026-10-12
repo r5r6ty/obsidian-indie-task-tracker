@@ -297,6 +297,20 @@ class BoardView extends ItemView {
     this.render();
   }
 
+  /* 整列左右移动（toCi = 原始下标系的插入位；同列原位自动跳过） */
+  moveColumnTo(fromCi, toCi) {
+    const cols = this.doc.columns;
+    if (fromCi < 0 || fromCi >= cols.length) return;
+    toCi = Math.max(0, Math.min(toCi, cols.length));
+    if (toCi === fromCi || toCi === fromCi + 1) return;   // 原位
+    const [col] = cols.splice(fromCi, 1);
+    let idx = toCi;
+    if (fromCi < idx) idx -= 1;   // 先移除后插入的索引补偿
+    cols.splice(idx, 0, col);
+    this.scheduleWrite();
+    this.render();
+  }
+
   delCards(cards) {
     const set = new Set(cards);
     for (const col of this.doc.columns) col.cards = col.cards.filter(c => !set.has(c));
@@ -333,6 +347,19 @@ class BoardView extends ItemView {
     this.contentEl.querySelectorAll('.itt-drop-above, .itt-drop-tail')
       .forEach(el => el.classList.remove('itt-drop-above', 'itt-drop-tail'));
     this.dropMark = null;
+  }
+
+  /* 整列拖动落点指示：before = 插到该列左侧，否则右侧 */
+  setColDropIndicator(colEl, before) {
+    for (const x of this.colEls) {
+      const on = x.el === colEl;
+      x.el.classList.toggle('itt-drop-col-left', on && before);
+      x.el.classList.toggle('itt-drop-col-right', on && !before);
+    }
+  }
+
+  clearColDropIndicator() {
+    for (const x of this.colEls) x.el.classList.remove('itt-drop-col-left', 'itt-drop-col-right');
   }
 
   /* 移动卡（insertIdx 省略=追加到列尾；同列先移除后插入的索引自动补偿） */
@@ -446,6 +473,30 @@ class BoardView extends ItemView {
     this.cardEls = [];
     this.colEls = [];
     this.doc.columns.forEach((col, ci) => this.renderCol(cols, col, ci));
+    // 整列拖动（数据库用法：列顺序即数据结构）——container 级处理 text/itt-col，与卡片拖拽互不干扰
+    cols.addEventListener('dragover', e => {
+      if (!e.dataTransfer.types.includes('text/itt-col')) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      const colEl = e.target.closest('.itt-col');
+      if (!colEl) { this.clearColDropIndicator(); return; }
+      const r = colEl.getBoundingClientRect();
+      this.setColDropIndicator(colEl, e.clientX < r.left + r.width / 2);
+    });
+    cols.addEventListener('dragleave', () => this.clearColDropIndicator());
+    cols.addEventListener('drop', e => {
+      if (!e.dataTransfer.types.includes('text/itt-col')) return;
+      e.preventDefault();
+      this.clearColDropIndicator();
+      const fromCi = Number(e.dataTransfer.getData('text/itt-col'));
+      const colEl = e.target.closest('.itt-col');
+      if (!colEl || Number.isNaN(fromCi)) return;
+      const hit = this.colEls.find(x => x.el === colEl);
+      if (!hit) return;
+      const r = colEl.getBoundingClientRect();
+      let toCi = hit.ci;
+      if (e.clientX >= r.left + r.width / 2) toCi += 1;   // 右半 = 插到它后面
+      this.moveColumnTo(fromCi, toCi);
+    });
     this.renderDetailInto(detail, focusTitle);
   }
 
@@ -461,6 +512,7 @@ class BoardView extends ItemView {
     el.addEventListener('dragleave', () => el.classList.remove('itt-drop'));
     el.addEventListener('drop', e => {
       e.preventDefault(); el.classList.remove('itt-drop');
+      if (e.dataTransfer.types.includes('text/itt-col')) return;   // 列拖拽交给 container 处理
       const cards = this._dragCards;
       if (!cards || !cards.length) { this.clearDropIndicator(); return; }
       // 落点必须先读后清：clearDropIndicator 会把 dropMark 置 null
@@ -477,6 +529,12 @@ class BoardView extends ItemView {
     });
 
     const head = el.createDiv({ cls: 'itt-col-head' });
+    const grip = head.createSpan({ cls: 'itt-col-grip', text: '⠿', attr: { title: '拖动整列（左右移动）', draggable: 'true' } });
+    grip.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/itt-col', String(ci));
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    grip.addEventListener('dragend', () => this.clearColDropIndicator());
     const nameEl = head.createSpan({ cls: 'itt-name', text: col.name });
     nameEl.addEventListener('dblclick', () => {
       const input = head.createEl('input', { type: 'text', value: col.name, cls: 'itt-rename' });

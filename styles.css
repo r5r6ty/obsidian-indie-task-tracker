@@ -37,6 +37,15 @@
 .itt-col-tools { margin-left: auto; display: flex; gap: 2px; }
 .itt-col-tools button { padding: 0 6px; min-height: 0; height: 20px; font-size: var(--font-ui-smaller); }
 .itt-rename { width: 100%; }
+.itt-col-grip {
+  cursor: grab; color: var(--text-muted); opacity: .55;
+  font-size: var(--font-ui-smaller); padding: 0 2px;
+  user-select: none; -webkit-user-select: none;
+}
+.itt-col-grip:hover { opacity: 1; color: var(--color-accent); }
+.itt-col-grip:active { cursor: grabbing; }
+.itt-col.itt-drop-col-left { box-shadow: inset 3px 0 0 0 var(--color-accent); }
+.itt-col.itt-drop-col-right { box-shadow: inset -3px 0 0 0 var(--color-accent); }
 
 .itt-cards {
   overflow-y: auto; padding: 6px 8px 8px;
