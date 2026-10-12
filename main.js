@@ -647,11 +647,17 @@ class BoardView extends ItemView {
     const sel = this.multiCards.includes(card);
     const el = parent.createDiv({
       cls: 'itt-card' + (sel ? ' itt-sel' : ''),
-      text: card.title,
       attr: { draggable: 'true', title: '点击：编辑；Ctrl+点击：多选；Shift+点击：范围选；拖拽：移动（多选整批）；右键：菜单' }
     });
+    this.renderTitleMd(el, card.title);
     this.cardEls.push({ el, card });
     el.addEventListener('click', e => {
+      const a = e.target.closest('a.internal-link');
+      if (a) {
+        e.preventDefault();
+        this.app.workspace.openLinkText(a.getAttr('data-href') || a.getAttr('href'), this.file ? this.file.path : '', false);
+        return;
+      }
       if (e.ctrlKey || e.metaKey) this.toggleSelect(card);
       else if (e.shiftKey && this.sel) this.rangeSelect(card);
       else this.selectCard(card);
@@ -675,6 +681,23 @@ class BoardView extends ItemView {
     el.addEventListener('contextmenu', e => {
       e.preventDefault(); e.stopPropagation();
       this.showCardMenu(e, card);
+    });
+  }
+
+  // 卡片标题按 Markdown 渲染（**粗体** / ~~删除线~~ / `代码` / [[双链]] 等）
+  renderTitleMd(el, title) {
+    el.empty();
+    const wrap = el.createDiv({ cls: 'itt-title-md' });
+    try {
+      MarkdownRenderer.render(this.app, title, wrap, this.file ? this.file.path : '', this);
+    } catch (e) {
+      console.error('[ITT] 标题渲染失败', e);
+      wrap.textContent = title;
+    }
+    // 展开块级 <p>，保持卡片标题单行紧凑布局
+    wrap.querySelectorAll(':scope > p').forEach(p => {
+      while (p.firstChild) wrap.insertBefore(p.firstChild, p);
+      p.remove();
     });
   }
 
@@ -747,7 +770,7 @@ class BoardView extends ItemView {
     ti.addEventListener('input', () => {
       card.title = ti.value.trim() ? ti.value : '(无标题)';
       const hit = this.cardEls.find(x => x.card === card);
-      if (hit) hit.el.textContent = card.title;
+      if (hit) this.renderTitleMd(hit.el, card.title);
       this.scheduleWrite();
     });
 

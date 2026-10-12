@@ -64,6 +64,10 @@
 .itt-card.itt-sel { border-color: var(--color-accent); color: var(--color-accent); background: var(--background-primary-alt); }
 .itt-card.itt-drop-above { box-shadow: 0 -3px 0 0 var(--color-accent); }
 .itt-cards.itt-drop-tail { box-shadow: inset 0 -3px 0 0 var(--color-accent); }
+.itt-title-md {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.itt-title-md p { margin: 0; padding: 0; display: inline; }
 
 .itt-detail {
   width: 420px; flex-shrink: 0;
